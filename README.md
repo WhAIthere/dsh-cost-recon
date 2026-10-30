@@ -1,4 +1,50 @@
-﻿# token统计
+# DSH Cost Recon · DSH 花费对账看板
+
+DSH（DeepSeek Harness）的**花费对账 + 分层透视**看板：读本地会话日志与官方小时桶，把每次模型调用还原成
+原子行，生成一个**自带全部数据的单文件 HTML**（不用起服务、不装插件、离线可看）。License: MIT。
+
+大多数用量工具回答"我花了多少"；这个还回答"我怎么知道这个数是对的"，并让你按自己的维度切开看。
+
+- **自由分层、每层独立排序**：在 {天, 小时, 周, 工作区, 会话, 轮次, 模型, 峰谷, 主/子} 里任选 1~3 个当层级，
+  每一层都能单独换排序 —— 横向比会话、一个会话按天、一天里按小时/按轮次……
+- **对账而不是估算**：抓官方小时桶（requests / token / 金额），逐小时和会话日志折算值对比；
+  对账表里的 `折算/官方` 100% 就是严丝合缝，对不上的残差单独列（备注写出差多少）。
+- **把日志漏掉的钱补回去**：fork/resume 重放去重、中断空壳、空转/重试（官方有请求、日志里没有）、
+  原生搜索账单、上下文压缩摘要 —— 都补进同一套按轮次的统计里。
+- **峰谷倍率用官方实测反推**（不写死 ×2）；价目表 / 节假日 / 预设都是可手改的 txt。
+- **离线优先**：产物是一个 HTML，数据全部内联，没网也能看。
+
+## English
+
+An offline **cost-reconciliation + pivot dashboard** for [DeepSeek Harness](https://www.deepseek.com/harness/).
+It reads local session logs plus the official hourly usage buckets, rebuilds every model call as an atomic row,
+and renders **one self-contained HTML file** — no server, no plugin, works offline. License: MIT.
+
+- **Free hierarchical grouping with per-level sorting** — pick any 1–3 of {day, hour, week, workspace, session,
+  turn, model, peak, main/sub}; each level sorts independently (compare sessions, one session day-by-day,
+  one day hour-by-hour, …).
+- **Reconciliation, not guessing** — official hourly buckets are compared against the log-derived cost every hour;
+  the table shows `recon / official` coverage (100% = exact) and reports whatever does not match.
+- **Missing spend is folded back in** — fork/resume de-duplication, interrupted shells, lost/retried requests,
+  the native-search audit log, and context-compaction summaries.
+- **Peak multiplier self-calibrates** from the official hourly cost instead of assuming x2.
+- **Offline by design** — one HTML with all data inlined.
+
+### Quick start
+
+```
+pip install zstandard
+python src/refresh.py            # scan logs -> dashboard.html
+python src/tests/run_tests.py    # self-check (no network)
+```
+
+Optional: put a platform `userToken` in `config/usertoken.txt` to enable the official reconciliation;
+without it the dashboard still works from session logs alone. Windows users can double-click
+`刷新看板.bat` instead.
+
+---
+
+# 完整文档（中文）
 
 DSH 本机 token 用量 / 花费的分层统计工具。数据来自三处：DSH 自己写的**账本文件**（钱最准）、`~/.dsh/sessions` 里的**会话日志**（能下钻到会话/轮次，还能拆 token 组成），以及 `~/.dsh/search-usage.jsonl` —— **原生搜索（deepseek-official）的旁路账单**（这部分不写会话日志，只能从这里拿）。攒进本地 SQLite，然后随便切维度看。
 
