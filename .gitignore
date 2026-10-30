@@ -1,0 +1,16 @@
+# ---- 你自己的数据 / 凭据（绝不能进仓库）----
+temp/
+dashboard.html
+看板.html
+config/usertoken.txt
+config/search-fix.txt
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# ---- 编辑器 ----
+.vscode/
+.idea/

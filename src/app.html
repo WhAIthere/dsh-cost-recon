@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DSH token / 花费分层报表</title>
+<style>
+  :root{ color-scheme:light;
+         --bg:#f4f5f7; --card:#fff; --line:#d8dbe0; --fg:#1d2129; --dim:#6b7280;
+         --fg2:#444; --input:#fff; --hover:#eef2f9; --grid:#eceef1;
+         --on:#e8f0fe; --on-line:#a8c7fa; --empty:#f1f3f5; --tile:#f0f2f5;
+         --d1:#b9c6dd; --d2:#cfd8e6; --d3:#dfe4ec;
+         --hot-bg:#fdecea; --hot-bg-hover:#fbdfdb; --hot-bg-sel:#f6dcdc; --hot-fg:#c62828;
+         --anom-bg:#fff8e6; --anom-bg-hover:#fdf1d6; --anom-bg-sel:#f8ecd2; --anom-fg:#b26a00;
+         --unk-fg:#1d6fb8; --warn-bg:#fff8e6; --warn-line:#f3d99a;
+         --rb-fg:#b8860b;
+         --c1:#4c8bf5; --c2:#f5a623; --c3:#34a853; --c4:#ea4335; --c5:#9c27b0; }
+  /* 深色模式：**只换"底 / 线 / 字"这些中性色**，外加把告警色**和黑底混一版**——
+     浅色模式那套是"亮底 + 深红/深黄"，黑底上会变成刺眼的亮带、字也发暗；
+     所以这里换成"黑底 + 暗红/暗琥珀底、亮红/亮黄字"，语义（红=超标、黄=异常）不变。 */
+  body.dark{ color-scheme:dark;
+             --bg:#14161a; --card:#1c1f24; --line:#343a44; --fg:#e8eaed; --dim:#9aa4b0;
+             --fg2:#cdd3da; --input:#242830; --hover:#262c36; --grid:#2b303a;
+             --on:#243349; --on-line:#3d5a86; --empty:#2b303a; --tile:#20242b;
+             --d1:#46587a; --d2:#3b4a63; --d3:#313d51;
+             --hot-bg:#331d1c; --hot-bg-hover:#3f2524; --hot-bg-sel:#4a2c2d; --hot-fg:#ff8b80;
+             --anom-bg:#332b19; --anom-bg-hover:#3f3520; --anom-bg-sel:#4a3f26; --anom-fg:#f2b34d;
+             --unk-fg:#7cb3ea; --warn-bg:#332b19; --warn-line:#5c4a22;
+             --rb-fg:#ffd75e; }
+  *{box-sizing:border-box}
+  body{margin:0;padding:12px;background:var(--bg);color:var(--fg);
+       font:13px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:4px;
+        padding:9px 11px;margin-bottom:9px}
+  h1{font-size:15px;margin:0 0 4px}
+  h2{font-size:12.5px;margin:0 0 6px;color:var(--dim);font-weight:600}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .kpi{display:flex;flex-wrap:wrap;gap:14px;margin-top:5px}
+  .kpi div b{font-size:16px;font-weight:700}
+  .kpi div span{color:var(--dim);font-size:11.5px;display:block}
+  select,button,input{font:inherit;padding:2px 6px;border:1px solid var(--line);
+       border-radius:3px;background:var(--input);color:inherit}
+  /* 日期/时间输入框里有一半是浏览器自己画的（右侧小图标、弹出的日历/时钟面板）：
+     那部分只认 `color-scheme`（上面 :root / body.dark 里设了），普通 CSS 碰不到。
+     这里再把框体本身的底色/字色钉死一遍，免得某些浏览器按 UA 的 system color 画。 */
+  input[type=date],input[type=time]{background:var(--input);color:var(--fg)}
+  button{cursor:pointer}
+  button:hover{background:var(--hover)}
+  .tabs{display:flex;gap:0;margin-bottom:8px}
+  .tabs button{border-radius:0;border-right:none;padding:3px 12px}
+  .tabs button:first-child{border-radius:3px 0 0 3px}
+  .tabs button:last-child{border-radius:0 3px 3px 0;border-right:1px solid var(--line)}
+  .tabs button.on{background:var(--on);border-color:var(--on-line);font-weight:600}
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  th,td{padding:2px 5px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+  th{color:var(--dim);font-weight:600;border-bottom:2px solid var(--line)}
+  .t th:nth-child(1),.t td:nth-child(1){text-align:left}
+  .t th:nth-child(6),.t td:nth-child(6),
+  .t th:nth-child(7),.t td:nth-child(7){text-align:left}
+  .t .rawcol{color:var(--dim);font-size:12px}
+  table.rawcol-off .rawcol{display:none}
+  /* 占比条：把百分比写在色块里，宽度不够就自动空着 */
+  .pbar{display:table;width:100%;border-collapse:collapse;min-width:72px}
+  .pbar span{display:table-cell;padding:0;border:none;height:15px;line-height:15px;
+             font-size:10px;color:#fff;text-align:center;overflow:hidden}
+  .pbar span.c1{background:var(--c1)} .pbar span.c2{background:var(--c2)}
+  .pbar span.c3{background:var(--c3)}
+  .pbar span.empty{background:var(--empty);color:transparent}
+  tbody tr:hover{background:var(--hover)}
+  .tree td:first-child{text-align:left;font-family:Consolas,Menlo,monospace}
+  /* 长文字截断：层级/会话名与起止时间超宽就显示省略号，悬停看全文（为了不出横向滚动条） */
+  .lblwrap{display:inline-block;max-width:min(460px,32vw);overflow:hidden;text-overflow:ellipsis;
+           white-space:nowrap;vertical-align:bottom}
+  .lblwrap.twrap{max-width:min(170px,14vw)}
+  .tree tr{cursor:pointer}
+  .tree tr.sel{background:var(--on)}
+  /* 超阈值标红：只上色，数字一个字都不动 */
+  .tree tr.hot{background:var(--hot-bg)}
+  .tree tr.hot:hover{background:var(--hot-bg-hover)}
+  .tree tr.hot.sel{background:var(--hot-bg-sel)}
+  .hotcost,.hotpeak{color:var(--hot-fg);font-weight:700}
+  /* 中断空壳：走琥珀色这条通道，和标红互不干扰 */
+  .tree tr.anom{background:var(--anom-bg)}
+  .tree tr.anom:hover{background:var(--anom-bg-hover)}
+  .tree tr.anom.sel{background:var(--anom-bg-sel)}
+  .anom-mark{color:var(--anom-fg);font-weight:700;cursor:help}
+  /* 未知价目：钱没算进去（price_row=-1）——蓝色问号，和琥珀色异常、红色超标互不干扰 */
+  .unk-mark{color:var(--unk-fg);font-weight:700;cursor:help;margin-left:.25em}
+  /* 重建参考（疑似缓存重建）：三档——严判=红字、只过宽判=黄字、都没过=灰横杠。
+     只给这一格的字上色，**不动整行**。 */
+  .rbcell{text-align:right}
+  .rbcell.loose{color:var(--rb-fg);font-weight:600}   /* 只过宽判：黄字 */
+  .rbcell.strict{color:var(--hot-fg);font-weight:700}  /* 过严判：红字（和"花费超阈值"同一支红，语义都是"严重"） */
+  .rbcell.none{color:var(--dim)}                       /* 都没过：横杠 */
+  table.rbcol-off .rbcol,table.rbcol-off .rbcell{display:none}
+  .tw{display:inline-block;color:var(--dim)}
+  /* 层级视觉提示：每层一个竖线 + 略缩字号，让"哪层动了"一眼可见 */
+  .tree tr.d1 td:first-child{box-shadow:inset 2px 0 0 var(--d1)}
+  .tree tr.d2 td:first-child{box-shadow:inset 2px 0 0 var(--d2)}
+  .tree tr.d3 td:first-child{box-shadow:inset 2px 0 0 var(--d3)}
+  .tree tr.d1 td:first-child{font-size:12.5px}
+  .tree tr.d2 td:first-child{font-size:12px}
+  .tree tr.d3 td:first-child{font-size:11.5px}
+  .lvl0{font-weight:700}
+  .lvl1{font-weight:600}
+  .lvl2{color:var(--fg2)}
+  .lvl3{color:var(--dim)}
+  .bar{height:9px;background:var(--grid);border-radius:2px;overflow:hidden;min-width:40px;
+       display:inline-flex;vertical-align:middle}
+  .bar i{display:block;height:100%}
+  .kg{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--dim);margin-top:5px;
+      align-items:center}
+  .kg em{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
+  .sub{color:var(--dim);font-size:11.5px}
+  .panel{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+  .panel>div{min-width:270px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);border-radius:10px;padding:0 8px;cursor:pointer;
+        background:var(--input);font-size:12px;user-select:none}
+  .chip.on{background:var(--on);border-color:var(--on-line);font-weight:600}
+  .warn{background:var(--warn-bg);border-color:var(--warn-line)}
+  .mono{font-family:Consolas,Menlo,monospace}
+  .hidden{display:none}
+  svg text{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  /* 图（donut / 柱图 / 时间线 / treemap）里的"中性色"也走变量，深色模式跟着变；
+     图例色（--c1~c5）和各色块上的白字保持不变。 */
+  svg .track{stroke:var(--grid)}
+  svg .axis{stroke:var(--line)}
+  svg .lbl{fill:var(--dim)}
+  svg .val{fill:var(--fg2)}
+  svg .tilebg{fill:var(--tile);stroke:var(--line)}
+</style>
+</head>
+<body>
+<!--BODY-->
+<div class="card">
+  <h1>DSH token / 花费 分层报表</h1>
+  <div class="sub" id="head"></div>
+  <div class="kpi" id="kpi"></div>
+</div>
+
+<div class="card">
+  <div class="row" style="gap:14px">
+    <div class="row">
+      <span>层级：</span>
+      <select id="d0"></select> <span>&rsaquo;</span>
+      <select id="d1"></select> <span>&rsaquo;</span>
+      <select id="d2"></select>
+    </div>
+    <div class="row">
+      <span>排序：</span>
+      <span class="sub" id="sortLab0"></span><select id="sort0" title="第 1 层排序"></select>
+      <span class="sub" id="sortLab1"></span><select id="sort1" title="第 2 层排序"></select>
+      <span class="sub" id="sortLab2"></span><select id="sort2" title="第 3 层排序"></select>
+    </div>
+  </div>
+  <div class="row" style="gap:14px;margin-top:6px">
+    <div class="row">
+      <span>预设：</span>
+      <select id="preset" style="width:360px"
+        title="点一下＝套用一组查看设置；只改它提到的选项，其余不动（选完自动弹回占位符）。清单在工具根目录的 presets.txt，可直接改"></select>
+      <span class="sub" id="persistNote"></span>
+    </div>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <span>时间：</span>
+    <input id="from" type="date" style="width:128px">
+    <input id="fromTime" type="time" style="width:96px" value="00:00"
+      title="开始时间（精确到分钟，默认 00:00）">
+    ~
+    <input id="to" type="date" style="width:128px">
+    <input id="toTime" type="time" style="width:96px" value="23:59"
+      title="结束时间（精确到分钟，默认 23:59；这一分钟整分钟都算进去，等价于 24:00）">
+    <button id="btnAll">全部</button><button id="btn7">近 7 天</button><button id="btnToday">最新一天</button>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <span>空间：</span><span class="chips" id="wsChips"></span>
+    <button id="wsAll">全选</button><button id="wsNone">全不选</button>
+  </div>
+  <div class="row" style="gap:14px;margin-top:6px">
+    <div class="row"><span>关键字：</span>
+      <input id="kw" placeholder="会话 id / 模型，逗号分隔" style="width:210px"></div>
+    <label><input type="checkbox" id="mainOnly"> 只算主会话</label>
+    <label><input type="checkbox" id="withReplay"> 含重放</label>
+    <label title="把中断空壳（罢工/被中断的那一步：有记录、没有 usage）标黄显示，并把按小时差额估算出来的金额/token 一并计入统计；关掉就和以前完全一致">
+      <input type="checkbox" id="withAnomaly"> 含异常（中断）</label>
+    <span class="sub" id="filterInfo"></span>
+  </div>
+  <div class="row" style="gap:14px;margin-top:6px">
+    <span>标红：</span>
+    <label class="sub">花费 &gt; <input id="hotCost" type="number" step="0.01" min="0"
+      value="0.1" style="width:76px"> 元</label>
+    <label class="sub">峰值 &gt; <input id="hotPeak" type="number" step="1" min="0"
+      value="50" style="width:68px"> %</label>
+    <label title="勾上后只标「没有下级、或下级被折叠」的行——也就是当前屏幕上最下层的那些；展开着的父层不标">
+      <input type="checkbox" id="hotLeafOnly"> 只标红最下层</label>
+    <span class="sub">只上色、不过滤；填 0 关闭该项</span>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="expAll">展开全部</button><button id="expNone">折叠全部</button>
+    <label style="margin-left:8px"><input type="checkbox" id="showRaw"> 显示具体 token 数</label>
+    <label style="margin-left:8px" title="表格最后一列：疑似缓存重建的「估算多花金额」（纯参考，那笔钱本来就在花费里）">
+      <input type="checkbox" id="showRb" checked> 重建参考列</label>
+    <label style="margin-left:8px" title="黑底白字；标红/标黄这些告警色保持不变">
+      <input type="checkbox" id="dark"> 深色模式</label>
+    <span class="crumb sub" id="crumb"></span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="tabs">
+    <button id="tabTree" class="on">缩进树表</button>
+    <button id="tabMap">树图 treemap</button>
+    <button id="tabSun">旭日图 sunburst</button>
+  </div>
+  <div id="viewTree">
+    <table class="t tree">
+      <thead><tr>
+        <th>层级</th><th>花费(元)</th><th>占父级</th><th>总占比</th>
+        <th>总 token</th><th>token 占比</th><th>开销占比</th>
+        <th>峰值</th><th>调用</th><th>起止时间</th>
+        <th class="rbcol" title="这一行（含下级）里原生搜索花了多少：token 开销（已含在花费里）。
+传闻的每次 ¥0.005 固定费实测对不上账，按 0 计（19 次搜索那小时残差 0.0000）。悬停看明细。">搜索开销</th>
+        <th title="疑似缓存重建的「估算多花金额」：那一轮的第一条调用整段上下文没命中缓存。
+判据（见 doc/MAINTAIN.md §2.10）：上下文≥50k 且首调用未命中率≥50%=宽判（黄字）；≥70% 且次调用立刻回落<10%=严判（整行标黄）。
+没嫌疑画横杠。**钱早就含在「花费」里，这一列只是把它拆出来看，不影响任何数字。**" class="rbcol">重建参考</th>
+        <th class="rawcol">缓存命中</th><th class="rawcol">未命中</th><th class="rawcol">输出</th>
+      </tr></thead>
+      <tbody id="treeRows"></tbody>
+      <tfoot><tr id="treeTot"></tr></tfoot>
+    </table>
+    <div class="kg">
+      <span><b>token 占比</b>：按 token 数量分</span>
+      <span class="sub">|</span>
+      <span><b>开销占比</b>：按各自贡献的钱分 —— 这两个的差别就是"量大 ≠ 贵"</span>
+      <span class="sub">（悬停任意一条可看具体数字）</span>
+    </div>
+  </div>
+  <div id="viewMap" class="hidden">
+    <div class="kg" id="mapLegend"></div>
+    <div id="mapBox"></div>
+    <div class="sub">面积 = 当前指标；块内为叶子（最细一级），点小格可下钻到该节点</div>
+  </div>
+  <div id="viewSun" class="hidden">
+    <div id="sunBox"></div>
+    <div class="sub">由内向外 = 第 1/2/3 级；点扇区可下钻</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2 id="panelTitle">选中节点明细</h2>
+  <div class="panel">
+    <div><div class="sub">花费组成（按 token 折算）</div><div id="donutCost" class="row"></div></div>
+    <div><div class="sub">token 组成</div><div id="donutToken" class="row"></div></div>
+    <div style="flex:1"><div class="row" style="justify-content:space-between">
+        <span class="sub" id="tlTitle">时间分布</span>
+        <span class="sub">图表指标：
+          <select id="metric">
+            <option value="cost">花费</option><option value="tokens">token</option>
+            <option value="calls">调用数</option><option value="cache">缓存命中</option>
+            <option value="in">未命中输入</option><option value="out">输出</option>
+          </select>
+        </span>
+      </div><div id="timeline"></div></div>
+  </div>
+  <div class="sub" id="panelHint"></div>
+</div>
+
+<div class="card">
+  <h2>每日花费（柱=折算，▲=余额账本口径）</h2>
+  <div id="dailyChart"></div>
+</div>
+
+<div class="card">
+  <h2>对账（官方小时桶是基准；余额账本天级、精度只到"分"，折算会偏离）</h2>
+  <table><thead><tr>
+    <th>日期</th><th>官方(小时桶)</th><th>账本(元·分)</th><th>events</th><th>ledger</th><th>会话折算</th>
+    <th title="「会话折算」占官方实付的比例：100% = 我们统计到的跟官方一样多；90% = 只统计到九成（少算）；110% = 多算了一成">折算/官方</th><th>旁路token</th><th>备注</th>
+  </tr></thead><tbody id="recon"></tbody></table>
+</div>
