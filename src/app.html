@@ -88,6 +88,8 @@
   /* 重建参考（疑似缓存重建）：三档——严判=红字、只过宽判=黄字、都没过=灰横杠。
      只给这一格的字上色，**不动整行**。 */
   .rbcell{text-align:right}
+  .toolcell{text-align:right;font-variant-numeric:tabular-nums}
+  .toolcell.none{color:var(--dim)}
   .rbcell.loose{color:var(--rb-fg);font-weight:600}   /* 只过宽判：黄字 */
   .rbcell.strict{color:var(--hot-fg);font-weight:700}  /* 过严判：红字（和"花费超阈值"同一支红，语义都是"严重"） */
   .rbcell.none{color:var(--dim)}                       /* 都没过：横杠 */
@@ -217,7 +219,7 @@
       <thead><tr>
         <th>层级</th><th>花费(元)</th><th>占父级</th><th>总占比</th>
         <th>总 token</th><th>token 占比</th><th>开销占比</th>
-        <th>峰值</th><th>调用</th><th>起止时间</th>
+        <th>峰值</th><th>调用</th><th title="这一步/这一行发起了多少次工具调用（工具本身不花钱，但返回内容会进下一次调用的输入）">工具</th><th>起止时间</th>
         <th class="rbcol" title="这一行（含下级）里原生搜索花了多少：token 开销（已含在花费里）。
 传闻的每次 ¥0.005 固定费实测对不上账，按 0 计（19 次搜索那小时残差 0.0000）。悬停看明细。">搜索开销</th>
         <th title="疑似缓存重建的「估算多花金额」：那一轮的第一条调用整段上下文没命中缓存。

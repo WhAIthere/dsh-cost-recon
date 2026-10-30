@@ -268,6 +268,19 @@ official_hour.requests  vs  我们数得出来的调用数
 - 代价：dashboard.html 从 ~4.7MB 涨到 ~6.0MB（1.3 万条 × 100 字）。老库靠 `MSG_COLUMNS` 补列 +
   `SCHEMA_VERSION=6` 触发一次全量重扫（14 秒）。
 
+### 2.6d 工具调用（2026-10-30 加，库结构 v7）
+
+`tool/call` / `tool/result` 也收进库：表 `tool_calls(session_id, day, turn_no, step_no, ts, call_id, name, ok)`，
+`ok` 取 tool 消息的 `isError`。**工具本身不花钱，绝不参与金额/次数统计**，只做两件事：
+解释"为什么这一步/下一步贵"（工具返回的大文本会进下一次调用的输入）、以及看这一步在干什么。
+
+实测（455 会话）：**18,157 次调用 / 68 种工具 / 516 次失败**；`edit 5435 · pwsh 4956 · read 2108 · write 980`。
+
+- **一次（轮,步）可以发起多个工具**：中位数 1 次，但 2~10 次的很多，长尾能到几十上百（多会话合并后的极端值）。
+- **调用一定跟在某次 `assistant/message` 之后**（18,125 条 100% 如此）：模型调用 → N 次工具 → 下一次模型调用。
+- 界面：表里多一列 **工具**（只有次数），鼠标悬停才显示 `edit×3 · pwsh×2`（叶子行）；父节点只显示合计。
+- 老库靠 `SCHEMA_VERSION=7` 触发一次全量重扫（16 秒）把历史补齐。
+
 ### 2.7 高峰倍率自校准 + 节假日表（2026-09-28 加）
 
 **要解决的问题**：`is_peak()` 原来只会"周末 + 两个窗口"，遇到**法定节假日**就把高峰算错了
@@ -717,7 +730,7 @@ python src\holidays.py 2026-09-25 2026-09-20   # 查某几天算不算高峰（�
 python src\prices.py                           # 看价目表读成了什么：各档 + 若干"模型×日期"匹配
 python src\scan_sessions.py --full --recon     # 全量重扫（约 10 秒 / 60MB 压缩）
 python src\hier.py day,workspace               # 终端版分层查询（**不含搜索账单**，见 §2.9）
-python src\tests\run_tests.py                  # 自测（439 项，退出码 0 = PASS）
+python src\tests\run_tests.py                  # 自测（446 项，退出码 0 = PASS）
 ```
 
 ⚠️ **本机沙箱的一个坑**：用 `ops_bash`（git-bash）跑自测时，`node --check` 那一步会报

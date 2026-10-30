@@ -2098,6 +2098,57 @@ def test_step_snippet(tmp):
     con.close()
 
 
+# ================================================================ Q. 工具调用
+def test_tool_calls(tmp):
+    """tool/call + tool/result 入库：名字/次数/成败，并且挂到对应那一「步」上（只展示，不算钱）。"""
+    root = os.path.join(tmp, "sessions")
+    dbfile = use_temp(tmp, "tools.db")
+    con = db.connect(dbfile)
+
+    d = os.path.join(root, "wsT", "session-TOOL")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "session.v4.jsonl.zstd")
+    T = ms(2026, 9, 25, 9, 0)
+    usage = {"inputTokens": 1000, "outputTokens": 100, "cacheReadTokens": 5000,
+             "cacheWriteTokens": 0, "totalTokens": 6100}
+    evs = [{"type": "session", "version": 4, "id": "session-TOOL", "createdAt": T,
+            "cwd": "C:" + chr(92) + "wsT", "delegationDepth": 0, "agentPreset": "standard"},
+           {"type": "assistant/message", "time": T + 1000,
+            "data": {"turn": 1, "step": 1, "usage": usage,
+                     "message": {"role": "assistant", "content": [{"type": "text", "text": "先看文件"}]}}}]
+    for i, (nm, bad) in enumerate([("read", False), ("grep", False), ("pwsh", True)]):
+        evs.append({"type": "tool/call", "time": T + 2000 + i,
+                    "data": {"turn": 1, "step": 1, "callId": "c%d" % i, "name": nm, "arguments": "{}"}})
+        evs.append({"type": "tool/result", "time": T + 2500 + i,
+                    "data": {"turn": 1, "step": 1,
+                             "message": {"role": "tool", "toolCallId": "c%d" % i,
+                                         "isError": bad, "content": [{"type": "text", "text": "ok"}]}}})
+    import zstandard as _zs
+    with open(p, "wb") as f:
+        f.write(_zs.ZstdCompressor().compress(
+            (chr(10).join(json.dumps(x, ensure_ascii=False) for x in evs) + chr(10)).encode("utf-8")))
+
+    ss.scan(full=True, recon=False, quiet=True, root=root)
+    rows = [dict(r) for r in con.execute(
+        "SELECT turn_no, step_no, name, ok FROM tool_calls WHERE session_id='session-TOOL' "
+        "ORDER BY call_id")]
+    check("tool.count", len(rows), 3)
+    check("tool.names", [r["name"] for r in rows], ["read", "grep", "pwsh"])
+    check("tool.error_flag", [r["ok"] for r in rows], [1, 1, 0])
+    check("tool.turn_step", (rows[0]["turn_no"], rows[0]["step_no"]), (1, 1))
+    # 工具调用**不进**金额/次数统计
+    check("tool.not_counted_in_calls",
+          con.execute("SELECT COUNT(*) FROM messages WHERE session_id='session-TOOL'").fetchone()[0], 1)
+
+    data = rh.build_data("2026-09-25", "2026-09-25")
+    cols = data["mcols"]
+    i_sid, i_tn, i_tnm = cols.index("session_id"), cols.index("tn"), cols.index("tnm")
+    hit = [r for r in data["mrows"] if r[i_sid] == "session-TOOL"]
+    check("tool.in_mrows", (len(hit), hit[0][i_tn]), (1, 3))
+    check("tool.names_in_row", ("read×1" in hit[0][i_tnm] and "pwsh×1" in hit[0][i_tnm]), True)
+    con.close()
+
+
 # ================================================================ 主流程
 def main():
     tmp = tempfile.mkdtemp(prefix="tokenstats_test_")
@@ -2113,7 +2164,8 @@ def main():
                    lambda: test_minutes(tmp), lambda: test_dark(tmp),
                    lambda: test_search(tmp), lambda: test_rebuild(tmp), lambda: test_side_calls(tmp), lambda: test_fork_tie(tmp),
                    lambda: test_compaction(tmp), lambda: test_fork_tie_order(tmp),
-                   lambda: test_lost_calls(tmp), lambda: test_step_snippet(tmp)):
+                   lambda: test_lost_calls(tmp), lambda: test_step_snippet(tmp),
+                   lambda: test_tool_calls(tmp)):
             guard(fn)
     finally:
         restore()

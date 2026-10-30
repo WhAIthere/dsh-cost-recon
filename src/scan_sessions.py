@@ -122,7 +122,7 @@ def list_session_dirs(root=None):
 
 
 def parse_session(path: str, ts_hint=None):
-    """解析一个会话文件 → (meta, messages, unknowns)。
+    """解析一个会话文件 → (meta, messages, unknowns, tools)。
 
     每条消息：{msg_id, ts, start_ts, turn_no, step_no, model, provider, in/out/cache_read/
               cache_write/reasoning/total_tokens, sig}
@@ -134,6 +134,7 @@ def parse_session(path: str, ts_hint=None):
     meta = None
     messages = []
     unknowns = collections.Counter()
+    tools = []
     last_user_ts = None
     for o in read_lines(path):
         t = o.get("type")
@@ -152,6 +153,21 @@ def parse_session(path: str, ts_hint=None):
             continue
         d = o.get("data") if isinstance(o.get("data"), dict) else {}
         u = d.get("usage") if isinstance(d, dict) else None
+        if t == "tool/call":
+            tools.append({"ts": ts or 0, "turn_no": _num(d, "turn") or None,
+                          "step_no": _num(d, "step") or None,
+                          "call_id": str(d.get("callId") or ""),
+                          "name": str(d.get("name") or ""), "ok": 1})
+            continue
+        if t == "tool/result":
+            m2 = d.get("message") if isinstance(d.get("message"), dict) else {}
+            cid = str(m2.get("toolCallId") or (m2.get("source") or {}).get("callId") or "")
+            if cid and bool(m2.get("isError")):
+                for x in reversed(tools):
+                    if x["call_id"] == cid:
+                        x["ok"] = 0
+                        break
+            continue
         if t == "assistant/message" and isinstance(u, dict) and "inputTokens" in u:
             msg = d.get("message") if isinstance(d.get("message"), dict) else {}
             tok = {
@@ -201,7 +217,7 @@ def parse_session(path: str, ts_hint=None):
                 "reasoning": 0, "total_tokens": 0, "interrupted": 1, "chars": chars,
                 "snippet": _snippet(msg),
             })
-    return meta, messages, unknowns
+    return meta, messages, unknowns, tools
 
 
 def sync_derived_labels(con, quiet=True):
@@ -364,11 +380,11 @@ def scan(full=False, recon=False, quiet=False, root=None, with_labels=True):
         if unchanged:
             stats["skipped"] += 1
             pending.append({"ws_dir": ws_dir, "sid": sid, "version": version, "path": path,
-                            "st": st, "meta": None, "messages": None, "unknowns": None,
+                            "st": st, "meta": None, "messages": None, "unknowns": None, "tools": None,
                             "is_new": False})
             continue
         try:
-            meta, messages, unknowns = parse_session(path)
+            meta, messages, unknowns, tools = parse_session(path)
         except Exception as e:
             stats["failed"] += 1
             if not quiet:
@@ -385,7 +401,7 @@ def scan(full=False, recon=False, quiet=False, root=None, with_labels=True):
             ws_dir = os.path.basename(str(meta.get("cwd") or "").rstrip("\\/")) or "(未知工作区)"
         pending.append({"ws_dir": ws_dir, "sid": sid, "version": version, "path": path,
                         "st": st, "meta": meta, "messages": messages, "unknowns": unknowns,
-                        "is_new": True})
+                        "tools": tools, "is_new": True})
         stats["updated"] += 1
 
     # ---- 全局按时间排序后再定归属：同一调用（msg_id + token 全同）只算「最早那次」 ----
@@ -518,6 +534,17 @@ def scan(full=False, recon=False, quiet=False, root=None, with_labels=True):
                 "cost_est,price_row,keep,replayed,start_ts,interrupted,chars,snippet) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows)
+            # 工具调用（只做展示/统计，不参与金额）：先清这一会话的旧行，再整批插入
+            tlist = p.get("tools") or []
+            if tlist:
+                con.execute("DELETE FROM tool_calls WHERE session_id=?", (sid,))
+                con.executemany(
+                    "INSERT OR REPLACE INTO tool_calls "
+                    "(session_id,day,turn_no,step_no,ts,call_id,name,ok) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    [(sid, db.local_day(x["ts"]) if x["ts"] else "", x["turn_no"], x["step_no"],
+                      x["ts"], x["call_id"] or ("%s-%d" % (sid, k)), x["name"], x["ok"])
+                     for k, x in enumerate(tlist)])
             unknown_tokens += sum((p["unknowns"] or {}).values())
             stats["messages"] += len(rows)
         # 主会话 / 子代理归属：同工作区里「创建时间不晚于它」的最近主会话（排除自己）
@@ -635,7 +662,7 @@ def probe(root=None):
     if not dirs:
         return
     ws_dir, sid, version, path = dirs[0]
-    meta, messages, unknowns = parse_session(path)
+    meta, messages, unknowns, tools = parse_session(path)
     print("样例 = %s (v%d)" % (sid, version))
     print("  meta keys = %s" % sorted((meta or {}).keys()))
     print("  原子行 = %d，旁路 = %s" % (len(messages), dict(unknowns)))

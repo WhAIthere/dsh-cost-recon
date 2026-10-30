@@ -37,7 +37,7 @@ USAGE_JSON = os.path.join(DSH_DIR, ".dshw-usage.json")
 LEDGER_JSON = os.path.join(DSH_DIR, "dsh-usage", "usage-ledger.json")
 SESSIONS_DIR = os.path.join(DSH_DIR, "sessions")
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # ---------------------------------------------------------------- 价目表
 # 来源：~/.dsh/profiles/web/node_modules/@linxin666/dsh-usage/lib/index.js 的 FLASH_PRICE
@@ -231,6 +231,16 @@ CREATE TABLE IF NOT EXISTS side_session (
 CREATE TABLE IF NOT EXISTS side_log (
   session_id TEXT PRIMARY KEY, file TEXT, file_size INTEGER, file_mtime REAL
 );
+
+-- 工具调用（每次 assistant/message 之后模型点名的工具）：次数/名字/成败。
+-- 工具本身不花钱，但工具返回的内容会进下一次调用的输入 —— 用来解释"这一步/下一步为什么贵"。
+-- 只做展示与统计，绝不参与金额计算。
+CREATE TABLE IF NOT EXISTS tool_calls (
+  session_id TEXT, day TEXT, turn_no INTEGER, step_no INTEGER, ts INTEGER,
+  call_id TEXT, name TEXT, ok INTEGER DEFAULT 1,
+  PRIMARY KEY (session_id, call_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_step ON tool_calls (session_id, turn_no, step_no);
 
 -- 空转/重试留下的"没记到"的调用：官方有 requests、我们连壳都没有。
 -- 只按小时记（没有会话、没有正文、没有 token），**次数和金额**都能对账。

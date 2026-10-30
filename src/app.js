@@ -215,6 +215,7 @@ function blankNode(key, label, dim, depth){
           unknown:0, est_cost:0, est_tokens:0,
           rb:0, rbLvl:0, rbN:0,            // 疑似缓存重建（只作参考）：累计代价 / 最高档 / 次数
           srch:0, srchN:0,                 // 原生搜索开销（只作参考）：累计金额 / 次数
+          tools:0,                         // 工具调用次数（纯展示，不参与金额）
           minTs:Infinity, maxTs:-Infinity, children:[], items:[], parent:null, path:"",
           sortBy: "", sortLabel: "", leafItems:[]};
 }
@@ -234,6 +235,7 @@ function addToNode(nd, m){
   if (m.rb > 0){ nd.rb += m.rb; nd.rbN += 1; nd.rbLvl = Math.max(nd.rbLvl, m.rbLvl || 0); }
   // 原生搜索：钱已经含在 cost_est 里，这里只把"其中搜索那部分"拆出来给列看
   if (m.srchN){ nd.srch += (m.srch || 0); nd.srchN += m.srchN; }
+  if (m.tn) nd.tools += m.tn;
   if (m.replay) nd.replay_calls += 1;
   if (m.interrupted){                       // 异常往上传播：折叠着也能在祖先行看到 ⚠
     if (m.replayed){ nd.anomaly_copy = (nd.anomaly_copy || 0) + 1; }
@@ -637,6 +639,16 @@ function selectNodePath(path){
   S.selected = path;
   render();
 }
+// 工具调用：只显示次数，明细（哪个工具×几次）放 title；叶子行才有明细
+function toolCell(node){
+  if (!node.tools) return '<td class="toolcell none">—</td>';
+  const leaf = (node.leafItems && node.leafItems.length) ? node.leafItems[0] : null;
+  const detail = leaf && leaf.tnm ? leaf.tnm : "";
+  const tip = "本行" + (leaf ? "" : "（含下级）") + "共 " + node.tools + " 次工具调用"
+            + (detail ? "：" + detail : (leaf ? "" : "（明细看叶子行）"))
+            + "。工具本身不花钱，但工具返回的内容会进下一次调用的输入";
+  return '<td class="toolcell" title="' + esc(tip) + '">' + node.tools + '</td>';
+}
 function render(){
   const dims = activeDims();
   const root = getTree();
@@ -765,6 +777,7 @@ function render(){
       <td>${costBar(node)}</td>
       <td class="${hotPeak?"hotpeak":""}">${node.cost ? pct(node.peak_cost, node.cost).toFixed(0)+"%" : "-"}</td>
       <td>${fmtInt(node.calls)}</td>
+      ${toolCell(node)}
       <td class="sub"><span class="lblwrap twrap" title="${esc(spanText(node))}">${esc(spanText(node))}</span></td>
       ${srchCell}
       ${rbCell}
@@ -775,7 +788,7 @@ function render(){
     <td>${fmtInt(tot.tokens)}</td>
     <td>${tokenBar(root)}</td><td>${costBar(root)}</td>
     <td>${pct(tot.peak_cost, tot.cost).toFixed(0)}%</td>
-    <td>${fmtInt(tot.calls)}</td><td class="sub">${esc(spanText(root))}</td>
+    <td>${fmtInt(tot.calls)}</td><td class="toolcell">${root.tools || "—"}</td><td class="sub">${esc(spanText(root))}</td>
     <td class="rbcell srccell${root.srchN ? "" : " none"}"
       title="本筛选项下原生搜索的 token 开销之和（已含在总花费里）">${root.srchN ? fmtMoney(root.srch) : "—"}</td>
     <td class="rbcell${root.rbLvl === 2 ? " strict" : (root.rb > 0 ? " loose" : " none")}"

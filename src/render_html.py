@@ -118,6 +118,19 @@ def build_data(start: str, end: str) -> dict:
         ws_names, sess_names, turn_names = db.load_labels(con)
         # 疑似缓存重建（只作参考：每轮首调用整段未命中 → 估算多花的钱）
         rbflags = db.turn_rebuild_flags(con, start, end)
+        # 工具调用（纯展示）：按 (会话, 轮, 步) 汇总成"这一步发起了几次、都是什么工具"
+        tmap = {}
+        for r in con.execute(
+                "SELECT session_id, turn_no, step_no, COUNT(*) n, GROUP_CONCAT(name) nm "
+                "FROM tool_calls WHERE day BETWEEN ? AND ? AND day<>'' "
+                "GROUP BY session_id, turn_no, step_no", (start, end)):
+            cnt, names = {}, []
+            for nm in (r["nm"] or "").split(","):
+                if nm:
+                    cnt[nm] = cnt.get(nm, 0) + 1
+            for nm, k in sorted(cnt.items(), key=lambda kv: -kv[1])[:4]:
+                names.append(nm + "×" + str(k))
+            tmap[(r["session_id"], r["turn_no"], r["step_no"])] = (r["n"], " · ".join(names))
     finally:
         con.close()
 
@@ -142,6 +155,8 @@ def build_data(start: str, end: str) -> dict:
             m["unknown_price"] = 0
         m["replay"] = 0 if m["keep"] else 1
         m["kind"] = ""
+        _t = tmap.get((m["session_id"], m.get("turn_no"), m.get("step_no"))) or (0, "")
+        m["tn"], m["tnm"] = _t[0], _t[1]
         m["srch"], m["srchN"] = 0.0, 0        # 搜索开销（只给"搜索开销"列看，钱已含在 cost_est 里）
         # 疑似缓存重建：只挂在该轮**第一条调用**上（金额=估算多花的钱），父节点自己累加
         f = rbflags.get((m["session_id"], m["turn_no"]))
@@ -263,7 +278,7 @@ def build_data(start: str, end: str) -> dict:
     daily = [daily[k] for k in sorted(daily)]
 
     # 列式存储：减少内联体积
-    mcols = ["ts", "day", "hour", "turn_no", "step_no", "snippet",
+    mcols = ["ts", "day", "hour", "turn_no", "step_no", "snippet", "tn", "tnm",
              "model", "workspace", "depth", "session_id",
              "parent_id", "in_tokens", "out_tokens", "cache_read", "total_tokens",
              "cost_est", "cost_cache", "cost_in", "cost_out", "peak", "replay", "start_ts",
