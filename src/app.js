@@ -706,9 +706,10 @@ function render(){
     + (AN.unmatched ? `；另有 ${fmtMoney(AN.unmatched)} 元官方开销对不上任何中断（未分摊）` : "");
   $("crumb").textContent = dims.length ? "层级：" + dims.map(d => DIM_LABEL[d]).join(" › ") : "未选层级";
 
-  // 树表
+  // 树表（分页渲染，见 paintRows）
   const vis = visibleRows(root);
-  $("treeRows").innerHTML = vis.map(({node, depth}) => {
+  S.vis = vis; S.visTot = tot; S.visSel = sel;
+function rowHtml(node, depth, tot, sel){
     const hasKids = node.children.length > 0;
     const collapsed = S.collapsed.has(node.path);
     const ind = "&nbsp;".repeat(depth * 4);
@@ -782,7 +783,33 @@ function render(){
       ${srchCell}
       ${rbCell}
       ${rawCols(node)}</tr>`;
-  }).join("");
+}
+
+// 分页渲染：一次只画 PAGE 行（DOM 行数是卡顿的根源），滚到底再追加
+const PAGE = 400;
+function paintRows(keep){
+  const box = $("treeRows"), vis = S.vis || [], tot = S.visTot, sel = S.visSel;
+  const to = Math.min(vis.length, Math.min(4000, Math.max(PAGE, keep || 0)));
+  let html = "";
+  for (let i = 0; i < to; i++){ const o = vis[i]; html += rowHtml(o.node, o.depth, tot, sel); }
+  html += (to >= vis.length)
+    ? '<tr class="more"><td colspan="16">共 ' + fmtInt(vis.length) + ' 行（已全部显示）</td></tr>'
+    : '<tr class="more" id="moreRow"><td colspan="16">已显示 ' + fmtInt(to) + ' / '
+      + fmtInt(vis.length) + ' 行 · 继续向下滚动加载（或按 End）</td></tr>';
+  box.innerHTML = html;
+  S.shown = to;
+}
+function moreRows(){
+  if (!S.vis || S.shown >= S.vis.length) return;
+  const el = document.getElementById("moreRow");
+  if (el && el.getBoundingClientRect().top < window.innerHeight + 400) paintRows(S.shown + PAGE);
+}
+window.addEventListener("scroll", () => {
+  if (S.moreTick) return;
+  S.moreTick = requestAnimationFrame(() => { S.moreTick = 0; moreRows(); });
+}, {passive:true});
+
+  paintRows(S.shown || 0);
   $("treeTot").innerHTML = `<td>合计（${vis.length} 行 / 共 ${nodesOf(root).length} 节点）</td>
     <td>${fmtMoney(tot.cost)}</td><td>100%</td><td>100%</td>
     <td>${fmtInt(tot.tokens)}</td>
@@ -794,18 +821,18 @@ function render(){
     <td class="rbcell${root.rbLvl === 2 ? " strict" : (root.rb > 0 ? " loose" : " none")}"
       title="本筛选项下所有疑似缓存重建的估算多花金额之和">${root.rb > 0 ? fmtMoney(root.rb) : "—"}</td>
     ${rawCols(tot)}`;
-  $("treeRows").querySelectorAll("tr").forEach(tr => {
+  // 事件委托：只挂一个监听（上万行时逐行 onclick 本身就慢）
+  $("treeRows").onclick = (e) => {
+    const tr = e.target.closest ? e.target.closest("tr[data-path]") : null;
+    if (!tr) return;
     const path = tr.getAttribute("data-path");
-    const nd = findNode(root, path);
-    if (!nd) return;
-    tr.onclick = (e) => {
-      if (e.target.classList.contains("tw")){          // 点三角：只折叠/展开，不选中
-        if (S.collapsed.has(path)) S.collapsed.delete(path); else S.collapsed.add(path);
-        render(); return;
-      }
-      S.selected = path; render();
-    };
-  });
+    if (e.target.classList.contains("tw")){          // 点三角：只折叠/展开，不选中
+      if (S.collapsed.has(path)) S.collapsed.delete(path); else S.collapsed.add(path);
+      S.shown = 0;                                    // 折叠变化后从头上计 400 行
+      render(); return;
+    }
+    S.selected = path; render();
+  };
 
   // 视图切换
   $("viewTree").classList.toggle("hidden", S.view !== "tree");

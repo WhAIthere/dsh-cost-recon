@@ -526,6 +526,27 @@ turn 被硬删（本机装了 `dsh-turn-hard-delete`）、或者对面根本没�
 没有官方数据写「无官方数据」，当天写「当日数据未结算」，没有会话记录写「无会话记录」。
 **还能再省（没做，收益 <1 秒）**：显示名逐会话增量（现在只要有会话变动就全读 0.8 秒）。
 
+### 2.12b 树表分页渲染（2026-10-30 加，解决"层级到底层就卡死"）
+
+问题：选了 `会话 › 轮次 › 步` 这种三层到底，可视行数能到 **1.6 万行**，一次 `innerHTML` 全画出来
+就是 25 万个 DOM 节点，浏览器直接卡死（还会触发逐行 `onclick` 绑定，更慢）。
+
+做法（等价于"虚拟滚动"里最省的那种：**增量渲染 + 滚动加载**）：
+
+- `paintRows(keep)` 一次最多画 **400 行**（`PAGE`），行数多于这个就在表尾放一行
+  `已显示 400 / 16084 行 · 继续向下滚动加载`；
+- `window` 的 scroll 里用 `requestAnimationFrame` 节流，判断表尾那行的 `getBoundingClientRect().top`
+  是否进入视口下方 400px，是就再画 400 行（上限 4000，避免一次把整张表又铺回来）；
+- **事件委托**：不再给每行挂 `onclick`，只在 `#treeRows` 上挂一个，靠 `e.target.closest("tr[data-path]")` 找行；
+- 选节点/改层级时保留已展开的行数（`S.shown`），不会一选中就缩回 400 行；
+  折叠/展开时重置为 400。
+
+效果：首屏 DOM 从 25 万节点降到 ~6 千（16 列 × 400 行），滚到底再追加。
+`tests: pager.footer_rendered / pager.rows_capped` 两个断言守住"一次不超过 400 行"。
+
+**还没做的**：treemap / 旭日图同样会一次画全部叶子（底部维度很多时不比树表轻），
+要优化可以按"前 N 大 + 其他"聚合，目前没那么用就先放着。
+
 **对外发布相关的三条（2026-10-30 加）**：
 - **key 名自动识别**：`db.resolve_key_name(con)` —— 环境变量 `DSH_API_KEY_NAME` → 库里花钱最多的
   `api_key_name` → 兜底 `"harness"`。以前写死 harness，别人拿到会静默「官方对账全空」；
@@ -730,7 +751,7 @@ python src\holidays.py 2026-09-25 2026-09-20   # 查某几天算不算高峰（�
 python src\prices.py                           # 看价目表读成了什么：各档 + 若干"模型×日期"匹配
 python src\scan_sessions.py --full --recon     # 全量重扫（约 10 秒 / 60MB 压缩）
 python src\hier.py day,workspace               # 终端版分层查询（**不含搜索账单**，见 §2.9）
-python src\tests\run_tests.py                  # 自测（446 项，退出码 0 = PASS）
+python src\tests\run_tests.py                  # 自测（448 项，退出码 0 = PASS）
 ```
 
 ⚠️ **本机沙箱的一个坑**：用 `ops_bash`（git-bash）跑自测时，`node --check` 那一步会报

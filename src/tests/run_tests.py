@@ -581,6 +581,7 @@ def test_hier_and_html(tmp):
         def hot_rows(html):
             out = []
             for row in _re.findall(r"<tr .*?</tr>", html, _re.S):
+                if "data-path" not in row: continue   # 分页的「加载更多」行不是数据行
                 marked = _re.search(r'class="[^"]*\bhot\b', row) is not None
                 bottom = ("▼" not in row) or ("▶" in row)
                 out.append((marked, bottom, row))
@@ -595,6 +596,11 @@ def test_hier_and_html(tmp):
                   [m for m, b, _ in pairs if m != b], [])
             check("hot.leafonly_not_all",
                   len([1 for m, _, _ in pairs if m]) < len(pairs), True)
+        # ---- 分页渲染：一次最多画 400 行，剩下的靠滚动加载 ----
+        okPG, resPG = rh.check_browser_with(out, "render();")
+        if okPG:
+            check("pager.footer_rendered", ('class="more"' in resPG["rows"]), True)
+            check("pager.rows_capped", resPG["rows"].count("<tr ") <= 401, True)
         okH13, resH13 = rh.check_browser_with(
             out, "S.hotCost=1e-9;S.hotPeak=0;S.hotLeafOnly=false;render();")
         if okH12 and okH13:
