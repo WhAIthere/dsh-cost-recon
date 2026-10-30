@@ -256,6 +256,18 @@ official_hour.requests  vs  我们数得出来的调用数
 报出来。实测一次补齐：59 小时 / 115 次 / ¥1.3833（其中 10-17 那次空转 = 2 次 / 0.3120 元）。
 **真删掉会话的不补**（日志没了，连次数都无从判断）。
 
+### 2.6c 步维度 + 每次调用的摘要（2026-10-30 加，库结构 v6）
+
+`messages` 里**每条 `assistant/message` 就是一次 API 调用**（带 `turn_no` / `step_no`），以前树最细只到
+「轮次」，现在把「步」也做成一档维度（`hier.DIMS` 加 `step`，键 = `轮次.步`）。
+
+- **摘要 `snippet`**：扫日志时取这条消息 content 里第一个非空块，优先 `reasoning`（思考链，正式输出通常在最后），
+  压成一行、截 100 字；只给界面认"这一步在干嘛"，**不参与任何金额/token 计算**。
+  实测 68% 的调用有思考链可摘，其余退回正文，再没有就空着。
+- 界面：显示成 `第3轮·第2步 用户在问xxx…`（摘要截 36 字）；排序键补零，否则 `10.2` 会排到 `2.1` 前面。
+- 代价：dashboard.html 从 ~4.7MB 涨到 ~6.0MB（1.3 万条 × 100 字）。老库靠 `MSG_COLUMNS` 补列 +
+  `SCHEMA_VERSION=6` 触发一次全量重扫（14 秒）。
+
 ### 2.7 高峰倍率自校准 + 节假日表（2026-09-28 加）
 
 **要解决的问题**：`is_peak()` 原来只会"周末 + 两个窗口"，遇到**法定节假日**就把高峰算错了
@@ -705,7 +717,7 @@ python src\holidays.py 2026-09-25 2026-09-20   # 查某几天算不算高峰（�
 python src\prices.py                           # 看价目表读成了什么：各档 + 若干"模型×日期"匹配
 python src\scan_sessions.py --full --recon     # 全量重扫（约 10 秒 / 60MB 压缩）
 python src\hier.py day,workspace               # 终端版分层查询（**不含搜索账单**，见 §2.9）
-python src\tests\run_tests.py                  # 自测（432 项，退出码 0 = PASS）
+python src\tests\run_tests.py                  # 自测（439 项，退出码 0 = PASS）
 ```
 
 ⚠️ **本机沙箱的一个坑**：用 `ops_bash`（git-bash）跑自测时，`node --check` 那一步会报

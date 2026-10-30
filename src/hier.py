@@ -42,6 +42,7 @@ DIMS = {
     "workspace": "s.workspace",
     "session":   "m.session_id",
     "turn":      "m.turn_no",
+    "step":      "printf('%d.%d', m.turn_no, COALESCE(m.step_no,1))",
     "model":     "m.model",
     "peak":      "CASE WHEN m.peak=1 THEN 'peak' ELSE 'offpeak' END",
     "depth":     "CASE WHEN s.depth=0 THEN 'main' ELSE 'sub' END",

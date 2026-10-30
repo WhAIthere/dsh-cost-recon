@@ -3,7 +3,7 @@ const DATA = __DATA__;
 DATA.msgs = DATA.mrows.map(r => { const o = {}; DATA.mcols.forEach((c,i) => o[c] = r[i]); return o; });
 
 const DIM_LABEL = {day:"天", hour:"小时", week:"周", workspace:"工作区", session:"会话",
-                   turn:"轮次", model:"模型", peak:"峰谷", depth:"主/子"};
+                   turn:"轮次", step:"步", model:"模型", peak:"峰谷", depth:"主/子"};
 // 显示名（来自 DSH 的映射表；缺了就回落显示 id，不影响任何统计）
 const LBL = (DATA.labels && DATA.labels.workspace) ? DATA.labels : {workspace:{}, session:{}, turn:{}};
 function wsName(w){ return LBL.workspace[w] || null; }
@@ -42,6 +42,8 @@ function dimKey(d, row){
     case "workspace": return row.workspace;
     case "session": return row.session_id;
     case "turn": return row.turn_no == null ? "-" : String(row.turn_no);
+    case "step": return row.turn_no == null ? "-"
+      : (String(row.turn_no) + "." + String(row.step_no == null ? 1 : row.step_no));
     case "model": return row.model;
     case "peak": return row.peak ? "高峰" : "非高峰";
     case "depth": return row.depth === 0 ? "主会话" : "子代理";
@@ -50,7 +52,12 @@ function dimKey(d, row){
 }
 // 排序用的键：时间维度用「结束时间」（= 最后一次活动），不是起点。
 // 用起点排会让"很久以前开始、但你刚刚还在用"的会话一直沉在底部，那是错的。
-function sortKey(d, row){ return (d === "day" || d === "week" || d === "hour") ? row.ts : dimKey(d, row); }
+function sortKey(d, row){
+  if (d === "day" || d === "week" || d === "hour") return row.ts;
+  if (d === "step") return String(row.turn_no == null ? 0 : row.turn_no).padStart(6,"0")
+                        + "." + String(row.step_no == null ? 1 : row.step_no).padStart(4,"0");
+  return dimKey(d, row);
+}
 function prettyDim(d, v, ctx){
   v = (v == null) ? "" : v;
   if (d === "workspace"){
@@ -62,6 +69,12 @@ function prettyDim(d, v, ctx){
     const n = sessName(v);
     if (n) return n.length > 24 ? n.slice(0,24) + "…" : n;
     return String(v).replace("session-","").slice(0,8) || "(空)";
+  }
+  if (d === "step"){
+    const parts = String(v).split(".");
+    const sn = (ctx && ctx.snippet) ? String(ctx.snippet) : "";
+    const head = parts.length > 1 ? ("第" + parts[0] + "轮·第" + parts[1] + "步") : ("第" + v + "步");
+    return sn ? (head + " " + (sn.length > 36 ? sn.slice(0,36) + "…" : sn)) : head;
   }
   if (d === "turn"){
     const sid = ctx && ctx.session_id;

@@ -59,6 +59,24 @@ def read_lines(path: str):
             continue
 
 
+
+def _snippet(msg, limit=100):
+    """从一条 assistant 消息里抽一小段文字当"这次调用在干嘛"的摘要。
+
+    优先 **reasoning（思考链）**，其次第一个非空 text —— 正式输出一般在最后，
+    前面这段才是模型"想什么"，认调用最划算。
+    """
+    for want in ("reasoning", "text"):
+        for blk in (msg.get("content") or []):
+            if not isinstance(blk, dict) or blk.get("type") != want:
+                continue
+            t = blk.get("text")
+            if not isinstance(t, str) or not t.strip():
+                continue
+            flat = " ".join(t.split())          # 合并换行 / 连续空白
+            return flat[:limit] + ("…" if len(flat) > limit else "")
+    return ""
+
 def _num(d, *keys):
     for k in keys:
         v = d.get(k)
@@ -154,6 +172,7 @@ def parse_session(path: str, ts_hint=None):
                 "step_no": _num(d, "step") or None,
                 "model": str(u.get("model") or (meta or {}).get("model") or "deepseek-flash"),
                 "provider": str(u.get("provider") or ""),
+                "snippet": _snippet(msg),
                 "sig": (tok["in_tokens"], tok["out_tokens"], tok["cache_read"], tok["cache_write"]),
                 **tok,
             })
@@ -180,6 +199,7 @@ def parse_session(path: str, ts_hint=None):
                 "sig": (0, 0, 0, 0),
                 "in_tokens": 0, "out_tokens": 0, "cache_read": 0, "cache_write": 0,
                 "reasoning": 0, "total_tokens": 0, "interrupted": 1, "chars": chars,
+                "snippet": _snippet(msg),
             })
     return meta, messages, unknowns
 
@@ -490,12 +510,13 @@ def scan(full=False, recon=False, quiet=False, root=None, with_labels=True):
                     m["turn_no"], m["step_no"], m["model"], m["provider"],
                     m["in_tokens"], m["out_tokens"], m["cache_read"], m["cache_write"],
                     m["reasoning"], m["total_tokens"], peak, cost, prow, keep, replay,
-                    m.get("start_ts") or m["ts"], m.get("interrupted", 0), m.get("chars", 0)))
+                    m.get("start_ts") or m["ts"], m.get("interrupted", 0), m.get("chars", 0),
+                    m.get("snippet") or ""))
             con.executemany(
                 "INSERT INTO messages (session_id,msg_id,seq,ts,day,hour,turn_no,step_no,model,"
                 "provider,in_tokens,out_tokens,cache_read,cache_write,reasoning,total_tokens,peak,"
-                "cost_est,price_row,keep,replayed,start_ts,interrupted,chars) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "cost_est,price_row,keep,replayed,start_ts,interrupted,chars,snippet) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows)
             unknown_tokens += sum((p["unknowns"] or {}).values())
             stats["messages"] += len(rows)

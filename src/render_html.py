@@ -69,7 +69,7 @@ def build_data(start: str, end: str) -> dict:
             "       m.replayed replayed, "
             "       m.interrupted interrupted, m.est_cost est_cost, m.est_tokens est_tokens, "
             "       m.est_note est_note, "
-            "       m.start_ts start_ts, s.parent_id parent_id "
+            "       m.start_ts start_ts, s.parent_id parent_id, m.snippet snippet "
             "FROM messages m JOIN sessions s ON s.session_id=m.session_id "
             "WHERE m.day BETWEEN ? AND ? AND m.day<>'' ORDER BY ts", (start, end))
         msgs = [dict(r) for r in rows]
@@ -202,7 +202,8 @@ def build_data(start: str, end: str) -> dict:
                 "peak": 0, "price_row": 3, "keep": 1, "replay": 0, "interrupted": 0,
                 "est_cost": 0.0, "est_tokens": 0, "est_note": "", "start_ts": ts,
                 "replayed": 0, "unknown_price": 0, "kind": "lost",
-                "srch": 0.0, "srchN": 0, "rb": 0.0, "rbLvl": 0})
+                "srch": 0.0, "srchN": 0, "rb": 0.0, "rbLvl": 0,
+                "step_no": None, "snippet": ""})
 
     # 压缩摘要 → 也摊成原子行；轮次键用 turn+0.5（"第 12 轮后"），标签注进 turn_names
     for s in crows:
@@ -237,7 +238,8 @@ def build_data(start: str, end: str) -> dict:
             "replay": 0, "interrupted": 0, "est_cost": 0.0, "est_tokens": 0,
             "est_note": "", "start_ts": s.get("ts"), "replayed": 0,
             "unknown_price": 0 if row is not None else 1, "kind": "compaction",
-            "srch": 0.0, "srchN": 0, "rb": 0.0, "rbLvl": 0})
+            "srch": 0.0, "srchN": 0, "rb": 0.0, "rbLvl": 0,
+                "step_no": None, "snippet": ""})
 
     # 日聚合只统计 keep=1（口径），由服务端算好给柱状图；未知价目的钱不计（单独计数）
     daily = {}
@@ -261,7 +263,8 @@ def build_data(start: str, end: str) -> dict:
     daily = [daily[k] for k in sorted(daily)]
 
     # 列式存储：减少内联体积
-    mcols = ["ts", "day", "hour", "turn_no", "model", "workspace", "depth", "session_id",
+    mcols = ["ts", "day", "hour", "turn_no", "step_no", "snippet",
+             "model", "workspace", "depth", "session_id",
              "parent_id", "in_tokens", "out_tokens", "cache_read", "total_tokens",
              "cost_est", "cost_cache", "cost_in", "cost_out", "peak", "replay", "start_ts",
              "interrupted", "est_cost", "est_tokens", "est_note", "replayed", "price_row",

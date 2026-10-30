@@ -37,7 +37,7 @@ USAGE_JSON = os.path.join(DSH_DIR, ".dshw-usage.json")
 LEDGER_JSON = os.path.join(DSH_DIR, "dsh-usage", "usage-ledger.json")
 SESSIONS_DIR = os.path.join(DSH_DIR, "sessions")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # ---------------------------------------------------------------- 价目表
 # 来源：~/.dsh/profiles/web/node_modules/@linxin666/dsh-usage/lib/index.js 的 FLASH_PRICE
@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS messages (
   est_tokens INTEGER DEFAULT 0,  -- 估算补回的 token 数（同上）
   est_note TEXT DEFAULT '',      -- 这一笔是怎么分的（"均分（3 个）" / "按正文长度加权" / ""）
   chars INTEGER DEFAULT 0,       -- 中断空壳的正文长度（用来做加权分配）
+  snippet TEXT DEFAULT '',      -- 这次调用返回内容的一小段（优先思考链），只给界面显示
   PRIMARY KEY (session_id, msg_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_msg_day      ON messages(day);
@@ -285,6 +286,7 @@ MSG_COLUMNS = {
     "chars": "INTEGER DEFAULT 0",         # v4：空壳的正文长度（加权分配用）
     "est_note": "TEXT DEFAULT ''",        # v4：这一笔怎么分的（均分 / 按长度加权）
     "price_row": "INTEGER DEFAULT -1",    # v5：命中的价目档号（-1 = 未知价目）
+    "snippet": "TEXT DEFAULT ''",         # v6：这次调用返回内容的一小段（优先思考链）
 }
 
 # 其它表的补列（{表: {列: 定义}}）

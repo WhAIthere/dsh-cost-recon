@@ -2041,6 +2041,63 @@ def test_lost_calls(tmp):
     con.close()
 
 
+# ================================================================ P. 步级摘要 + 步维度
+def test_step_snippet(tmp):
+    """每条调用（assistant/message = 一步）要存一小段返回内容当摘要，且「步」能当维度。"""
+    root = os.path.join(tmp, "sessions")
+    dbfile = use_temp(tmp, "step.db")
+    con = db.connect(dbfile)
+
+    def put(sname, evs):
+        d = os.path.join(root, "wsS", sname)
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "session.v4.jsonl.zstd")
+        with open(p, "wb") as f:
+            import zstandard as _zs
+            cctx = _zs.ZstdCompressor()
+            for e in evs:
+                f.write(cctx.compress((json.dumps(e, ensure_ascii=False) + chr(10)).encode()))
+
+    T = ms(2026, 9, 24, 10, 0)
+    sess = {"type": "session", "version": 4, "id": "session-STEP", "createdAt": T,
+            "cwd": "C:\wsS", "delegationDepth": 0, "agentPreset": "standard"}
+    usage = {"inputTokens": 1000, "outputTokens": 100, "cacheReadTokens": 5000,
+             "cacheWriteTokens": 0, "totalTokens": 6100}
+    # 一步里同时有 reasoning 和 text：摘要应该取 reasoning（思考链），不是正式输出
+    step1 = {"type": "assistant/message", "time": T + 1000,
+             "data": {"turn": 1, "step": 1, "usage": usage,
+                      "message": {"role": "assistant", "content": [
+                          {"type": "reasoning",
+                           "text": "先看看用户要什么，" + chr(10) + "然后决定用哪个工具"},
+                          {"type": "text", "text": "好的，我来处理。"}]}}}
+    step2 = {"type": "assistant/message", "time": T + 2000,
+             "data": {"turn": 1, "step": 2, "usage": usage,
+                      "message": {"role": "assistant", "content": [
+                          {"type": "text", "text": "第二步的正式输出"}]}}}
+    put("session-STEP", [sess, step1, step2])
+    con.commit()
+    ss.scan(full=True, recon=False, quiet=True, root=root)
+
+    rows = [dict(r) for r in con.execute(
+        "SELECT turn_no, step_no, snippet FROM messages WHERE session_id='session-STEP' "
+        "ORDER BY step_no")]
+    check("step.rows", len(rows), 2)
+    check("step.snippet_from_reasoning", rows[0]["snippet"].startswith("先看看用户要什么"), True)
+    check("step.snippet_flat", (chr(10) not in rows[0]["snippet"]), True)   # 换行被压平
+    check("step.snippet_fallback_text", rows[1]["snippet"], "第二步的正式输出")
+
+    # 看板数据里：snippet 有列、步维度在排序键里
+    data = rh.build_data("2026-09-24", "2026-09-24")
+    cols = data["mcols"]
+    check("step.dim_registered", ("step" in data["dim_order"]), True)
+    check("step.in_mcols", ("snippet" in cols and "step_no" in cols), True)
+    idx = cols.index("snippet")
+    vals = [r[idx] for r in data["mrows"]
+            if r[cols.index("session_id")] == "session-STEP"]
+    check("step.snippets_in_rows", sorted(v[:4] for v in vals), sorted(["先看看用", "第二步的"]))
+    con.close()
+
+
 # ================================================================ 主流程
 def main():
     tmp = tempfile.mkdtemp(prefix="tokenstats_test_")
@@ -2056,7 +2113,7 @@ def main():
                    lambda: test_minutes(tmp), lambda: test_dark(tmp),
                    lambda: test_search(tmp), lambda: test_rebuild(tmp), lambda: test_side_calls(tmp), lambda: test_fork_tie(tmp),
                    lambda: test_compaction(tmp), lambda: test_fork_tie_order(tmp),
-                   lambda: test_lost_calls(tmp)):
+                   lambda: test_lost_calls(tmp), lambda: test_step_snippet(tmp)):
             guard(fn)
     finally:
         restore()
